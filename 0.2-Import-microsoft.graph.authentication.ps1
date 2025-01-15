@@ -72,11 +72,11 @@ function Install-RequiredModule {
     else {
         Write-ConditionalAccessLog "Module '$ModuleName' not found. Attempting installation..."
         $installParams = @{
-            Name = $ModuleName
-            Force = $true
+            Name         = $ModuleName
+            Force        = $true
             AllowClobber = $true
-            Scope = 'AllUsers'
-            ErrorAction = 'Stop'
+            Scope        = 'AllUsers'
+            ErrorAction  = 'Stop'
         }
         
         try {
@@ -100,7 +100,9 @@ $requiredModules = @(
     'Microsoft.Graph.Authentication'
     'ExchangeOnlineManagement'
     'Microsoft.Graph.Beta.Identity.SignIns'
-    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Groups',
+    'Microsoft.Graph.Identity.SignIns',
+    'Microsoft.Graph.Beta.Identity.DirectoryManagement'
     
 )
 
@@ -156,9 +158,13 @@ function Import-RequiredModules {
         # Import required modules
         $modulesToImport = @(
             'Microsoft.Graph.Users'
-            'Microsoft.Graph.Groups'
+            'Microsoft.Graph.Identity.DirectoryManagement'
             'Microsoft.Graph.Authentication'
+            'ExchangeOnlineManagement'
             'Microsoft.Graph.Beta.Identity.SignIns'
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Identity.SignIns',
+            'Microsoft.Graph.Beta.Identity.DirectoryManagement'
         )
 
         foreach ($module in $modulesToImport) {
@@ -226,7 +232,8 @@ function Connect-GraphWithScope {
         "User.Read.All",
         "Group.ReadWrite.All",
         "Directory.ReadWrite.All",
-        "User.ReadWrite.All"
+        "User.ReadWrite.All",
+        "Application.Read.All"
     )
     
     Write-ConditionalAccessLog "Checking Microsoft Graph connection..."
