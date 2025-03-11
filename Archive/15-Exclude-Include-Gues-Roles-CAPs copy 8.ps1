@@ -1,6 +1,5 @@
 #Requires -Modules Microsoft.Graph.Identity.SignIns, PSWriteHTML
 
-
 function Get-ConditionalAccessPoliciesDetails {
     [CmdletBinding()]
     param()
@@ -49,7 +48,7 @@ function Get-ConditionalAccessPoliciesDetails {
                     DisplayName        = $policy.DisplayName
                     Id                 = $policy.Id
                     State              = $policy.State
-                    Version            = $version
+                    Version           = $version
                     CurrentGuestStatus = $currentGuestStatus
                 }
             })
@@ -62,7 +61,6 @@ function Get-ConditionalAccessPoliciesDetails {
         return @()
     }
 }
-
 
 function Export-GuestPolicyReport {
     [CmdletBinding()]
@@ -127,23 +125,27 @@ function Export-GuestPolicyReport {
     return $reportPaths
 }
 
-
 function Get-GuestUserTypes {
     [CmdletBinding()]
     param()
     
-    # Define guest types directly in the array to avoid blank rows
-    $guestTypes = @(
+    @(
+        [PSCustomObject]@{
+            DisplayName = "Internal guest users"
+            Id = "internalGuest"
+            Description = "Guest users within your organization"
+            Category = "Internal"
+        },
         [PSCustomObject]@{
             DisplayName = "B2B collaboration guest users"
             Id = "b2bCollaborationGuest"
-            Description = "Users who are invited to collaborate with your organization"
+            Description = "Users invited to collaborate with your organization"
             Category = "B2B"
         },
         [PSCustomObject]@{
             DisplayName = "B2B collaboration member users"
             Id = "b2bCollaborationMember"
-            Description = "Members from other organizations collaborating with yours"
+            Description = "Members from other organizations"
             Category = "B2B"
         },
         [PSCustomObject]@{
@@ -153,148 +155,19 @@ function Get-GuestUserTypes {
             Category = "B2B"
         },
         [PSCustomObject]@{
-            DisplayName = "Local guest users"
-            Id = "localGuest"
-            Description = "Guest users created within your organization"
-            Category = "Local"
+            DisplayName = "Other external users"
+            Id = "otherExternalUser"
+            Description = "All other types of external users"
+            Category = "External"
         },
         [PSCustomObject]@{
             DisplayName = "Service provider users"
             Id = "serviceProvider"
             Description = "Users from service provider organizations"
             Category = "External"
-        },
-        [PSCustomObject]@{
-            DisplayName = "Other external users"
-            Id = "otherExternalUser"
-            Description = "All other types of external users"
-            Category = "External"
         }
     ) | Sort-Object Category, DisplayName
-    
-    return $guestTypes
 }
-
-
-function Update-ConditionalAccessPolicy {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [object]$Policy,
-        
-        [Parameter(Mandatory)]
-        [ValidateSet('Include', 'Exclude')]
-        [string]$Operation,
-        
-        [Parameter(Mandatory)]
-        [object[]]$GuestTypes
-    )
-    
-    try {
-        Write-Host "Step 1: Retrieving current policy..." -ForegroundColor Cyan
-        $currentPolicy = Get-MgBetaIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $Policy.Id
-        
-        if (-not $currentPolicy) {
-            throw "Failed to retrieve current policy"
-        }
-
-        # Format guest types as a comma-separated string
-        $guestTypesString = $GuestTypes.Id -join ','
-        if ($guestTypesString -notlike '*internalGuest*') {
-            $guestTypesString = "internalGuest,$guestTypesString"
-        }
-
-        # Preserve existing policy settings
-        $bodyParams = @{
-            displayName = if ($Policy.DisplayName -match '-v\d+\.\d+$') {
-                $Policy.DisplayName -replace '-v\d+\.\d+$', "-v$($Policy.Version + 0.1)"
-            }
-            else {
-                "$($Policy.DisplayName)-v$($Policy.Version + 0.1)"
-            }
-            state = $currentPolicy.State
-            conditions = @{
-                clientAppTypes = $currentPolicy.Conditions.ClientAppTypes
-                applications = @{
-                    includeApplications = $currentPolicy.Conditions.Applications.IncludeApplications
-                    excludeApplications = $currentPolicy.Conditions.Applications.ExcludeApplications
-                }
-                users = @{
-                    includeUsers = $currentPolicy.Conditions.Users.IncludeUsers
-                    excludeUsers = $currentPolicy.Conditions.Users.ExcludeUsers
-                    includeGroups = $currentPolicy.Conditions.Users.IncludeGroups
-                    excludeGroups = $currentPolicy.Conditions.Users.ExcludeGroups
-                    excludeRoles = $currentPolicy.Conditions.Users.ExcludeRoles
-                }
-                devices = $currentPolicy.Conditions.Devices
-            }
-            grantControls = @{
-                operator = $currentPolicy.GrantControls.Operator
-                builtInControls = @()
-                authenticationStrength = @{
-                    id = "00000000-0000-0000-0000-000000000004"
-                }
-            }
-            sessionControls = @{
-                signInFrequency = @{
-                    isEnabled = $true
-                    type = $null
-                    value = $null
-                    frequencyInterval = "everyTime"
-                    authenticationType = "primaryAndSecondaryAuthentication"
-                }
-                persistentBrowser = @{
-                    isEnabled = $true
-                    mode = "never"
-                }
-            }
-        }
-
-        # Add guest configuration based on operation
-        $guestConfig = @{
-            guestOrExternalUserTypes = $guestTypesString
-            externalTenants = @{
-                membershipKind = "all"
-            }
-        }
-
-        if ($Operation -eq 'Include') {
-            $bodyParams.conditions.users['includeGuestsOrExternalUsers'] = $guestConfig
-            $bodyParams.conditions.users.Remove('excludeGuestsOrExternalUsers')
-        }
-        else {
-            $bodyParams.conditions.users['excludeGuestsOrExternalUsers'] = $guestConfig
-            $bodyParams.conditions.users.Remove('includeGuestsOrExternalUsers')
-        }
-
-        Write-Host "`nUpdating policy..." -ForegroundColor Cyan
-        Write-Verbose "Update body: $(ConvertTo-Json $bodyParams -Depth 10)"
-
-        $params = @{
-            ConditionalAccessPolicyId = $Policy.Id
-            BodyParameter = $bodyParams
-            ErrorAction = 'Stop'
-        }
-        
-        $null = Update-MgBetaIdentityConditionalAccessPolicy @params
-        Write-Host "Policy updated successfully" -ForegroundColor Green
-        
-        return $true
-    }
-    catch {
-        Write-Error -ErrorRecord $_
-        Write-Host "`nError updating policy: $($_.Exception.Message)" -ForegroundColor Red
-        
-        if ($_.Exception.Response) {
-            $response = $_.Exception.Response
-            Write-Host "Status Code: $($response.StatusCode)" -ForegroundColor Red
-            Write-Host "Status Description: $($response.StatusDescription)" -ForegroundColor Red
-        }
-        
-        return $false
-    }
-}
-
 
 function Update-ConditionalAccessPolicyGuestTypes {
     [CmdletBinding()]
@@ -308,7 +181,7 @@ function Update-ConditionalAccessPolicyGuestTypes {
         Write-Host "`nConditional Access Policy Guest Types Update Tool" -ForegroundColor Cyan
         Write-Host "=================================================" -ForegroundColor Cyan
         
-        # Get operation choice
+        # Get operation type
         $operation = Show-GuestOperationMenu
         if ($operation -eq 'Cancel') {
             Write-Host "`nOperation cancelled by user." -ForegroundColor Yellow
@@ -316,18 +189,21 @@ function Update-ConditionalAccessPolicyGuestTypes {
         }
         
         Write-Host "`nSelected Operation: $operation" -ForegroundColor Green
-
-        # Get policies
+        
+        # Get current policies
         Write-Host "`nRetrieving current policy information..." -ForegroundColor Cyan
         $policies = Get-ConditionalAccessPoliciesDetails
-        if (-not $policies) { 
+        
+        if (-not $policies) {
             Write-Warning "No policies found to process."
-            return 
+            return
         }
-                
+        
+        # Select policies to update
+        Write-Host "`nSelect policies to update..." -ForegroundColor Cyan
         $selectedPolicies = $policies | 
-        Out-GridView -Title "Select Conditional Access Policies to Modify" -PassThru
-                
+            Out-GridView -Title "Select Conditional Access Policies to Modify" -PassThru
+        
         if (-not $selectedPolicies) {
             Write-Warning "No policies selected for processing."
             return
@@ -335,39 +211,8 @@ function Update-ConditionalAccessPolicyGuestTypes {
 
         # Select guest types
         Write-Host "`nSelect guest types to $($operation.ToLower())..." -ForegroundColor Cyan
-        $guestTypes = @(
-            [PSCustomObject]@{
-                Name = "Internal guest users"
-                Id = "internalGuest"
-                Description = "Guest users within your organization"
-            },
-            [PSCustomObject]@{
-                Name = "B2B collaboration guest users"
-                Id = "b2bCollaborationGuest"
-                Description = "Users invited to collaborate with your organization"
-            },
-            [PSCustomObject]@{
-                Name = "B2B collaboration member users"
-                Id = "b2bCollaborationMember"
-                Description = "Members from other organizations"
-            },
-            [PSCustomObject]@{
-                Name = "B2B direct connect users"
-                Id = "b2bDirectConnectUser"
-                Description = "Users connecting directly from partner organizations"
-            },
-            [PSCustomObject]@{
-                Name = "Other external users"
-                Id = "otherExternalUser"
-                Description = "All other types of external users"
-            },
-            [PSCustomObject]@{
-                Name = "Service provider users"
-                Id = "serviceProvider"
-                Description = "Users from service provider organizations"
-            }
-        )
-
+        $guestTypes = Get-GuestUserTypes
+        
         $selectedGuestTypes = $guestTypes | 
             Out-GridView -Title "Select Guest Types to $operation" -PassThru
         
@@ -383,7 +228,7 @@ function Update-ConditionalAccessPolicyGuestTypes {
         Write-Host "`nSelected Policies:" -ForegroundColor White
         $selectedPolicies | ForEach-Object { Write-Host "- $($_.DisplayName)" -ForegroundColor Gray }
         Write-Host "`nSelected Guest Types:" -ForegroundColor White
-        $selectedGuestTypes | ForEach-Object { Write-Host "- $($_.Name)" -ForegroundColor Gray }
+        $selectedGuestTypes | ForEach-Object { Write-Host "- $($_.DisplayName)" -ForegroundColor Gray }
         
         $confirm = Read-Host "`nDo you want to proceed? [Y/N]"
         if ($confirm -notmatch '^[Yy]$') {
@@ -418,7 +263,7 @@ function Update-ConditionalAccessPolicyGuestTypes {
                     PolicyName = $policy.DisplayName
                     PolicyId = $policy.Id
                     Operation = $operation
-                    GuestTypesUpdated = $selectedGuestTypes.Name -join ', '
+                    GuestTypesUpdated = $selectedGuestTypes.DisplayName -join ', '
                     Status = 'Success'
                     ErrorMessage = ''
                 })
@@ -480,9 +325,6 @@ Enter your choice [I/E/C]:
         }
     } while ($true)
 }
-
-
-
 
 # Main execution
 Update-ConditionalAccessPolicyGuestTypes

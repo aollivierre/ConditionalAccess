@@ -51,8 +51,6 @@ function Get-ConditionalAccessPoliciesDetails {
 }
 
 
-
-
 function Get-EntraAdminRolesDetailed {
     [CmdletBinding()]
     param()

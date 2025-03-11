@@ -1,0 +1,42 @@
+TOPIC
+    about_ConditionalAccess
+
+SHORT DESCRIPTION
+    A PowerShell module for managing Azure AD Conditional Access Policies with focus on Guest Access.
+
+LONG DESCRIPTION
+    The ConditionalAccess module provides cmdlets for managing and updating Azure AD Conditional Access 
+    Policies, specifically focusing on guest access configurations. It allows you to:
+
+    - Retrieve details about existing Conditional Access policies
+    - Update guest access configurations (Include/Exclude)
+    - Generate detailed reports of policy changes
+    - Manage different guest user types
+
+COMMANDS
+    Get-ConditionalAccessPoliciesDetails
+        Retrieves and formats details about existing Conditional Access policies
+
+    Export-GuestPolicyReport
+        Generates HTML and CSV reports for policy updates
+
+    Update-ConditionalAccessPolicyGuestTypes
+        Updates guest configurations in Conditional Access policies
+
+EXAMPLES
+    Get policy details:
+    Get-ConditionalAccessPoliciesDetails
+
+    Update guest configurations:
+    Update-ConditionalAccessPolicyGuestTypes -OutputPath "C:\Reports"
+
+KEYWORDS
+    - ConditionalAccess
+    - Azure
+    - Security
+    - Guest Access
+    - Policies
+
+SEE ALSO
+    Online version: [Your documentation URL]
+    Microsoft Graph documentation: https://docs.microsoft.com/graph/api/resources/conditionalaccesspolicy
