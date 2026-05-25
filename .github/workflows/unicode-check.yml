@@ -1,0 +1,91 @@
+name: unicode-check
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+# contents: write lets the auto-remediation step commit the ASCII-fixed
+# files back to the branch. Pushes made with the default GITHUB_TOKEN do
+# NOT re-trigger workflows, so the commit-back cannot loop.
+permissions:
+  contents: write
+
+jobs:
+  ascii-check:
+    name: ascii-only via URT (single source of truth)
+    # Self-hosted (served by the JIT broker; see RUNNER_BROKER.md). NOT a
+    # GitHub-hosted runner: a billing-blocked free tier fails GitHub-hosted
+    # jobs at the billing gate before runner-label matching.
+    runs-on: [self-hosted, Linux]
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v5
+        with:
+          # Check out the branch HEAD (not the PR merge ref) so the
+          # auto-remediation commit can be pushed back to it.
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Clone URT outside workspace (avoids scanning the scanner)
+        shell: bash
+        run: |
+          # Use $RUNNER_TEMP (per-job dir) instead of /tmp/_urt (shared
+          # on a self-hosted runner host). Concurrent ephemeral runners
+          # otherwise collide with `destination path already exists`.
+          rm -rf "$RUNNER_TEMP/_urt"
+          git clone --depth 1 https://github.com/aollivierre/UnicodeReplacementTool "$RUNNER_TEMP/_urt"
+
+      - name: Remediate Unicode with URT (auto-fix in place)
+        shell: bash
+        run: |
+          # Fix mode (no --preview): rewrite any non-ASCII to ASCII.
+          # --no-backup: git history is the backup. Same pattern set as the
+          # verification pass below. Markdown is exempt (no *.md pattern).
+          python "$RUNNER_TEMP/_urt/unicode_replacer.py" \
+                 --yes --no-backup \
+                 . \
+                 --recursive \
+                 --pattern '*.py' '*.ps1' '*.psm1' '*.psd1' '*.toml' \
+                           '*.yml' '*.yaml' '*.sh' '*.bat' '*.cmd'
+
+      - name: Commit and push remediation if anything changed
+        shell: bash
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "unicode-check: already ASCII-clean; nothing to remediate."
+            exit 0
+          fi
+          echo "unicode-check: URT rewrote non-ASCII characters; committing the fix back."
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: auto-remediate Unicode -> ASCII via URT"
+          # Push back to the originating branch. GITHUB_TOKEN pushes do NOT
+          # re-trigger workflows, so this commit-back is loop-safe.
+          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
+
+      - name: Verify ASCII-clean (gate)
+        shell: bash
+        run: |
+          set -o pipefail
+          python "$RUNNER_TEMP/_urt/unicode_replacer.py" \
+                 --preview \
+                 . \
+                 --recursive \
+                 --pattern '*.py' '*.ps1' '*.psm1' '*.psd1' '*.toml' \
+                           '*.yml' '*.yaml' '*.sh' '*.bat' '*.cmd' \
+                 | tee urt-preview.txt
+
+          # URT prints "Files with Unicode: <n>" in its summary. After the
+          # remediation step this should be 0; a non-zero count here means URT
+          # could not fully fix something -- fail the job so it gets eyes.
+          if grep -E "Files with Unicode: [1-9]" urt-preview.txt > /dev/null; then
+            echo "unicode-check: Unicode still present after remediation (unexpected)."
+            exit 1
+          fi
+          echo "unicode-check: ASCII-clean."
